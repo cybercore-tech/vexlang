@@ -20,6 +20,16 @@ use diagnostics::{Diagnostic, Span, span_for};
 use parser::parse_vex;
 use pest::error::LineColLocation;
 
+struct PipelineOutput {
+    stmts: Vec<ast::Stmt>,
+    #[allow(dead_code)]
+    declarations: HashMap<String, Span>,
+    #[allow(dead_code)]
+    statement_spans: Vec<Span>,
+    #[allow(dead_code)]
+    expression_spans: Vec<Span>,
+}
+
 fn declaration_spans(source: &str, stmts: &[SpannedStmt]) -> HashMap<String, Span> {
     let mut spans = HashMap::new();
     for spanned in stmts {
@@ -133,7 +143,23 @@ fn recover_parse_diagnostics(source: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn pipeline(source: &str) -> Result<Vec<ast::Stmt>, Diagnostic> {
+#[allow(dead_code)]
+fn body_index_from_message(message: &str) -> Option<usize> {
+    let start = message.find("body[")? + "body[".len();
+    let rest = &message[start..];
+    let end = rest.find(']')?;
+    rest[..end].parse().ok()
+}
+
+#[allow(dead_code)]
+fn source_span_for_backend(message: &str, output: &PipelineOutput) -> Span {
+    body_index_from_message(message)
+        .and_then(|index| output.statement_spans.get(index).copied())
+        .or_else(|| output.expression_spans.first().copied())
+        .unwrap_or(Span { start: 0, end: 1 })
+}
+
+fn pipeline_with_spans(source: &str) -> Result<PipelineOutput, Diagnostic> {
     let pairs = parse_vex(source).map_err(|error| parse_error_diagnostic(source, error))?;
     let spanned_stmts = build_ast_with_spans(pairs).map_err(|error| {
         let message = error.to_string();
@@ -141,6 +167,14 @@ fn pipeline(source: &str) -> Result<Vec<ast::Stmt>, Diagnostic> {
         Diagnostic::new("E1002", message.clone(), span_for(source, needle))
     })?;
     let declarations = declaration_spans(source, &spanned_stmts);
+    let statement_spans = spanned_stmts
+        .iter()
+        .map(|spanned| spanned.span)
+        .collect::<Vec<_>>();
+    let expression_spans = spanned_stmts
+        .iter()
+        .flat_map(|spanned| spanned.expr_spans.iter().copied())
+        .collect::<Vec<_>>();
     let stmts = spanned_stmts
         .into_iter()
         .map(|spanned| spanned.stmt)
@@ -149,7 +183,16 @@ fn pipeline(source: &str) -> Result<Vec<ast::Stmt>, Diagnostic> {
     analyzer
         .analyze(&stmts)
         .map_err(|error| semantic_diagnostic(error, source, &declarations))?;
-    Ok(stmts)
+    Ok(PipelineOutput {
+        stmts,
+        declarations,
+        statement_spans,
+        expression_spans,
+    })
+}
+
+fn pipeline(source: &str) -> Result<Vec<ast::Stmt>, Diagnostic> {
+    pipeline_with_spans(source).map(|output| output.stmts)
 }
 
 fn pipeline_all(source: &str) -> Result<Vec<ast::Stmt>, Vec<Diagnostic>> {
@@ -190,9 +233,9 @@ fn pipeline_all(source: &str) -> Result<Vec<ast::Stmt>, Vec<Diagnostic>> {
     }
 }
 
-fn lower_source(source: &str) -> Result<(Vec<ast::Stmt>, ir::IrProgram), Diagnostic> {
-    let stmts = pipeline(source)?;
-    let program = ir::lower(&stmts).map_err(|error| {
+fn lower_source(source: &str) -> Result<(Vec<ast::SpannedStmt>, ir::IrProgram), Diagnostic> {
+    let output = pipeline_with_spans(source)?;
+    let program = ir::lower(&output.stmts).map_err(|error| {
         let message = error.to_string();
         let code = if message.starts_with("IR") {
             "E4003"
