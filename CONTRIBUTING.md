@@ -114,7 +114,7 @@ Thanks for helping build it carefully!
 3. Keep discussion on-topic and use the appropriate channel.
 4. Do not present alpha behavior as stable or production-ready.
 5. Never post security vulnerabilities publicly. Report them privately to
-   cybercore.sh@gmail.com with version, reproduction steps, and impact.
+   security@cybercoretech.net with version, reproduction steps, and impact.
 6. No spam, harassment, discrimination, impersonation, or malicious content.
 7. Respect licenses, authorship, privacy, and other contributors' work.
 8. Summarize important decisions in GitHub issues, discussions, PRs, or docs.
